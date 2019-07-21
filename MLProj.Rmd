@@ -1,0 +1,196 @@
+---
+title: "Predicting Human Activity in Exercise with Machine Learning"
+author: "Samantha Batcheller"
+date: "7/19/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Brief Overview 
+
+*"Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E)."*
+
+Read more about the experiment and the where the data for this project comes from [here](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har#weight_lifting_exercises#ixzz5uAJSjqob)
+
+Using this machine learning algorithm, predictions can be made as to which "Class" of exercise is being done by the participant (variable = classe). After comparing three different models (Classification Tree, Random Forest, and Gradient Boosting Machine), it was found that a Random Forest model is best for this case with a 99.6% accuracy in predictions.  
+
+## The Data
+
+The training data for this project are available [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+
+The test data are available [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+### Loading the Data & Necessary Packages
+``` {r warning=FALSE, message=FALSE}
+library(caret)
+library(rpart)
+library(randomForest)
+library(ggplot2)
+library(gridExtra)
+library(grid)
+library(e1071)
+library(knitr)
+```
+``` {r}
+set.seed(42)
+urlTrain<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+urlTest<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(urlTrain,destfile="pml-training.csv")
+download.file(urlTest,destfile="pml-testing.csv")
+
+data<-read.csv("pml-training.csv")
+valid<-read.csv("pml-testing.csv")
+
+```
+Note that the "testing" data file has been renamed as the validation set and will not be used until the final predictions.  
+
+### Slicing
+``` {r slice data}
+inTrain<-createDataPartition(y=data$classe,p=0.75,list=FALSE)
+training<-data[inTrain,]
+testing<-data[-inTrain,]
+dim(training)
+dim(testing)
+dim(valid)
+```
+To get a testing set separate from the final validation set, the initial trainging set has been spliced to give a train and test set.  
+
+### Pre-Processing
+First, the near zero variance variables are removed to shrink the data as they will have little impact ont he predictions.  
+``` {r remove nzv}
+##remove near zero variance variables
+nzv<-nearZeroVar(training)
+training<-training[,-nzv]
+testing<-testing[,-nzv]
+valid<-valid[,-nzv]
+##check dimensions to ensure they all have the same no. of cols
+dim(training)
+dim(testing)
+dim(valid)
+##check names of cols to see what is unnecessary 
+names(training)
+```
+Now, it can be seen from the column names remaining, columns 1-6 can be removed as they are just describing id numbers for participants and timestamps for the activity.
+``` {r remove 1-6}
+##remove the first 6 cols
+training<-training[,-c(1:6)]
+testing<-testing[,-c(1:6)]
+valid<-valid[,-c(1:6)]
+##check dimensions to ensure they match no. of cols
+dim(training)
+dim(testing)
+dim(valid)
+```
+Lastly, the columns that are mostly consisting of NA values will be removed as they will also have little impact on the predictions.  
+``` {r remove NA cols}
+##determine which cols have over 95% NAs and remove them 
+MostNAs<-sapply(training, function(x) mean(is.na(x))) > 0.95
+training<-training[,MostNAs==FALSE]
+testing<-testing[,MostNAs==FALSE]
+valid<-valid[,MostNAs==FALSE]
+##check dimensions to ensure same no. of cols
+dim(training)
+dim(testing)
+dim(valid)
+```
+
+## Fitting Model Comparison  
+
+Now that the data has been pruned to an efficient size, three fit models will be compared to see which has the highest accuracy for the predictors left. 
+
+### Classification Tree Model  
+
+First, a *Classification Tree Model* is fitted with cross validation of 5 folds. 
+``` {r Classification Tree}
+set.seed(42)
+trControl<-trainControl(method="cv", number=5)
+modFitCT<-train(classe~.,method="rpart",data=training,trControl=trControl)
+predCT<-predict(modFitCT,testing)
+confusionMatrix(predCT,testing$classe)
+confusionMatrix(predCT,testing$classe)$overall[1]
+```
+This model gives a **49.18% accuracy** and the classification tree is seen in Figure 1 below
+
+#### Figure 1: Classification Tree Plot     
+
+``` {r message=FALSE, warning=FALSE}
+library(rattle)
+```
+``` {r CT plot}
+fancyRpartPlot(modFitCT$finalModel)
+```
+
+### Gradient Boosting Machine Model  
+
+Next, a *Gradient Boosting Machine* is fitted with cross validation of 5 folds. 
+``` {r GBM}
+modFitGBM<-train(classe~.,method="gbm",data=training,trControl=trControl,verbose=FALSE)
+predGBM<-predict(modFitGBM,testing)
+confusionMatrix(predGBM,testing$classe)
+confusionMatrix(predGBM,testing$classe)$overall[1]
+```
+This model gives a **96.53% accuracy**
+
+
+### Random Forest Model  
+
+Last, a *Random Forest Model* is fitted with of cross validation of 5 folds. 
+``` {r Random Forest}
+modFitRF<-randomForest(classe~.,data=training,trControl=trControl)
+predRF<-predict(modFitRF,testing)
+confusionMatrix(predRF,testing$classe)
+confusionMatrix(predRF,testing$classe)$overall[1]
+```
+This model gives a **99.63 accuracy**
+
+
+## Generalization Error    
+
+The out-of-sample error can be calculated on the testing set by subtracting the accuracy from 1.  
+```{r}
+#Classification Tree Error
+1-0.4918
+#GBM Error
+1-0.9653
+#Random Forest Error
+1-0.9963
+```
+
+All calculations of accuracy and out-of-sample error can be seen here in one table to compare.  
+
+#### Figure 2: Table Comparison of Model Types
+
+Model Type                | Accuracy  | Generalization Error
+-------------             | --------- | -------------
+Classification Tree       | 49.18%    | 0.5082
+Gradient Boosting Machine | 96.53%    | 0.0347
+Random Forest             | 99.63%    | 0.0037
+
+  
+## Visual Comparison  
+
+All predictions were plotted next to the actual outcomes for a visual comparison and representation. 
+
+#### Figure 3: Plot Comparison of Model Predictions vs. Actual    
+
+``` {r}
+pTest<-qplot(testing$classe,main="Actual",xlab="Class Assignment",ylab="Frequency")
+pCT<-qplot(predCT,main="Classification Tree",xlab="Class Predictions",ylab="Frequency")
+pRF<-qplot(predRF,main="Random Forest",xlab="Class Predictions",ylab="Frequency")
+pGBM<-qplot(predGBM,main="GBM",xlab="Class Predictions",ylab="Frequency")
+
+grid.arrange(pTest,pCT,pRF,pGBM,ncol=2)
+```
+
+From Figures 2 & 3, it is clear the classification tree model is quite far from the actual and will obviously not be used.  The Random Forest and GBM models are close in accuracy, but the Random Forest model will be chosen for it's higher accuracy and will be used on the final validation set. 
+
+
+## Final Predictions  
+
+Using the Random Forest Model, the predictions on the validation set (the given original testing data) is as follows: 
+``` {r}
+predFinal<-predict(modFitRF,newdata=valid)
+```
